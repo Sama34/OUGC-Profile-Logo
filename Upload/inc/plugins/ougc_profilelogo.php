@@ -54,7 +54,6 @@ else
 	$plugins->add_hook("global_intermediate", "ougc_profilelogo_global");
 	$plugins->add_hook("usercp_start", "ougc_profilelogo_run");
 	$plugins->add_hook("usercp_menu_built", "ougc_profilelogo_nav");
-	$plugins->add_hook("member_profile_end", "ougc_profilelogo_profile");
 	$plugins->add_hook("fetch_wol_activity_end", "ougc_profilelogo_online_activity");
 	$plugins->add_hook("build_friendly_wol_location_end", "ougc_profilelogo_online_location");
 	$plugins->add_hook("modcp_do_editprofile_start", "ougc_profilelogo_removal");
@@ -405,191 +404,215 @@ function ougc_profilelogo_global()
 {
 	global $theme, $mybb;
 
-	if(!$mybb->user['ougc_profilelogo'])
+	if(THIS_SCRIPT == 'member.php' && $mybb->get_input('action') == 'profile' && $mybb->usergroup['canviewprofiles'])
 	{
-		return;
+		if($uid = $mybb->get_input('uid', 1))
+		{
+			$memprofile = get_user($uid);
+		}
+		else
+		{
+			$memprofile = $mybb->user;
+		}
+	}
+	else
+	{
+		$memprofile = $mybb->user;
 	}
 
-	$mybb->user['ougc_profilelogo'] = htmlspecialchars_uni($mybb->user['ougc_profilelogo']);
-
-	if($mybb->user['ougc_profilelogo_type'] == 'upload')
+	if($memprofile['ougc_profilelogo'])
 	{
-		$theme['logo'] = $mybb->get_asset_url($mybb->user['ougc_profilelogo']);
+		$memprofile['ougc_profilelogo'] = htmlspecialchars_uni($memprofile['ougc_profilelogo']);
+
+		if($memprofile['ougc_profilelogo_type'] == 'upload')
+		{
+			$theme['logo'] = $mybb->get_asset_url($memprofile['ougc_profilelogo']);
+		}
+		else
+		{
+			$theme['logo'] = $memprofile['ougc_profilelogo'];
+		}
+	}
+
+	if($theme['logo'] == $mybb->get_asset_url(''))
+	{
+		$theme['logo'] = '';
 	}
 }
 
 // The UserCP profile logo page
 function ougc_profilelogo_run()
 {
-	global $db, $mybb, $lang, $templates, $theme, $headerinclude, $usercpnav, $header, $ougc_profilelogo, $footer;
-	isset($lang->setting_group_ougc_profilelogo) or $lang->load("ougc_profilelogo");
-	require_once MYBB_ROOT."inc/functions_ougc_profilelogo.php";
+	global $mybb;
 
-	if($mybb->request_method == "post")
+	if($mybb->input['action'] == "ougc_profilelogo")
 	{
-		// Verify incoming POST request
-		verify_post_check($mybb->get_input('my_post_key'));
+		global $db, $lang, $templates, $theme, $headerinclude, $usercpnav, $header, $ougc_profilelogo, $footer;
+		isset($lang->setting_group_ougc_profilelogo) or $lang->load("ougc_profilelogo");
+		require_once MYBB_ROOT."inc/functions_ougc_profilelogo.php";
 
-		if($mybb->usergroup['ougc_profilelogo_canuse'] == 0)
+		if($mybb->request_method == "post")
 		{
-			error_no_permission();
-		}
+			// Verify incoming POST request
+			verify_post_check($mybb->get_input('my_post_key'));
 
-		$ougc_profilelogo_error = "";
-
-		if(!empty($mybb->input['remove'])) // remove profile logo
-		{
-			$updated_ougc_profilelogo = array(
-				"ougc_profilelogo" => "",
-				"ougc_profilelogo_dimensions" => "",
-				"ougc_profilelogo_type" => "",
-				"ougc_profilelogo_description" => ""
-			);
-			$db->update_query("users", $updated_ougc_profilelogo, "uid='{$mybb->user['uid']}'");
-			remove_ougc_profilelogo($mybb->user['uid']);
-		}
-		elseif($_FILES['ougc_profilelogoupload']['name']) // upload profile logo
-		{
-			if($mybb->usergroup['ougc_profilelogo_canupload'] == 0)
+			if($mybb->usergroup['ougc_profilelogo_canuse'] == 0)
 			{
 				error_no_permission();
 			}
 
-			// See if profile logo description is too long
-			if(my_strlen($mybb->input['ougc_profilelogo_description']) > 255)
-			{
-				$ougc_profilelogo_error = $lang->error_descriptiontoobig;
-			}
+			$ougc_profilelogo_error = "";
 
-			$ougc_profilelogo = upload_ougc_profilelogo();
-
-			if($ougc_profilelogo['error'])
+			if(!empty($mybb->input['remove'])) // remove profile logo
 			{
-				$ougc_profilelogo_error = $ougc_profilelogo['error'];
-			}
-			else
-			{
-				if($ougc_profilelogo['width'] > 0 && $ougc_profilelogo['height'] > 0)
-				{
-					$ougc_profilelogo_dimensions = $ougc_profilelogo['width']."|".$ougc_profilelogo['height'];
-				}
 				$updated_ougc_profilelogo = array(
-					"ougc_profilelogo" => $ougc_profilelogo['ougc_profilelogo'].'?dateline='.TIME_NOW,
-					"ougc_profilelogo_dimensions" => $ougc_profilelogo_dimensions,
-					"ougc_profilelogo_type" => "upload",
-					"ougc_profilelogo_description" => $db->escape_string($mybb->input['ougc_profilelogo_description'])
+					"ougc_profilelogo" => "",
+					"ougc_profilelogo_dimensions" => "",
+					"ougc_profilelogo_type" => "",
+					"ougc_profilelogo_description" => ""
 				);
 				$db->update_query("users", $updated_ougc_profilelogo, "uid='{$mybb->user['uid']}'");
+				remove_ougc_profilelogo($mybb->user['uid']);
 			}
-		}
-		elseif($mybb->input['ougc_profilelogourl']) // remote profile logo
-		{
-			$mybb->input['ougc_profilelogourl'] = trim($mybb->get_input('ougc_profilelogourl'));
-
-			$mybb->input['ougc_profilelogourl'] = preg_replace("#script:#i", "", $mybb->input['ougc_profilelogourl']);
-			$ext = get_extension($mybb->input['ougc_profilelogourl']);
-
-			// Copy the profile logo to the local server (work around remote URL access disabled for getlogosize)
-			$file = fetch_remote_file($mybb->input['ougc_profilelogourl']);
-			if(!$file)
+			elseif($_FILES['ougc_profilelogoupload']['name']) // upload profile logo
 			{
-				$ougc_profilelogo_error = $lang->error_invalidougc_profilelogourl;
+				if($mybb->usergroup['ougc_profilelogo_canupload'] == 0)
+				{
+					error_no_permission();
+				}
+
+				// See if profile logo description is too long
+				if(my_strlen($mybb->input['ougc_profilelogo_description']) > 255)
+				{
+					$ougc_profilelogo_error = $lang->error_descriptiontoobig;
+				}
+
+				$ougc_profilelogo = upload_ougc_profilelogo();
+
+				if($ougc_profilelogo['error'])
+				{
+					$ougc_profilelogo_error = $ougc_profilelogo['error'];
+				}
+				else
+				{
+					if($ougc_profilelogo['width'] > 0 && $ougc_profilelogo['height'] > 0)
+					{
+						$ougc_profilelogo_dimensions = $ougc_profilelogo['width']."|".$ougc_profilelogo['height'];
+					}
+					$updated_ougc_profilelogo = array(
+						"ougc_profilelogo" => $ougc_profilelogo['ougc_profilelogo'].'?dateline='.TIME_NOW,
+						"ougc_profilelogo_dimensions" => $ougc_profilelogo_dimensions,
+						"ougc_profilelogo_type" => "upload",
+						"ougc_profilelogo_description" => $db->escape_string($mybb->input['ougc_profilelogo_description'])
+					);
+					$db->update_query("users", $updated_ougc_profilelogo, "uid='{$mybb->user['uid']}'");
+				}
 			}
-			else
+			elseif($mybb->input['ougc_profilelogourl']) // remote profile logo
 			{
-				$tmp_name = $mybb->settings['ougc_profilelogo_uploadpath']."/remote_".md5(uniqid(rand(), true));
-				$fp = @fopen($tmp_name, "wb");
-				if(!$fp)
+				$mybb->input['ougc_profilelogourl'] = trim($mybb->get_input('ougc_profilelogourl'));
+
+				$mybb->input['ougc_profilelogourl'] = preg_replace("#script:#i", "", $mybb->input['ougc_profilelogourl']);
+				$ext = get_extension($mybb->input['ougc_profilelogourl']);
+
+				// Copy the profile logo to the local server (work around remote URL access disabled for getimagesize)
+				$file = fetch_remote_file($mybb->input['ougc_profilelogourl']);
+				if(!$file)
 				{
 					$ougc_profilelogo_error = $lang->error_invalidougc_profilelogourl;
 				}
 				else
 				{
-					fwrite($fp, $file);
-					fclose($fp);
-					list($width, $height, $type) = @getlogosize($tmp_name);
-					@unlink($tmp_name);
-					if(!$type)
+					$tmp_name = $mybb->settings['ougc_profilelogo_uploadpath']."/remote_".md5(uniqid(rand(), true));
+					$fp = @fopen($tmp_name, "wb");
+					if(!$fp)
 					{
 						$ougc_profilelogo_error = $lang->error_invalidougc_profilelogourl;
 					}
-				}
-			}
-
-			// See if profile logo description is too long
-			if(my_strlen($mybb->input['ougc_profilelogo_description']) > 255)
-			{
-				$ougc_profilelogo_error = $lang->error_descriptiontoobig;
-			}
-
-			if(empty($ougc_profilelogo_error))
-			{
-				if($width && $height && $mybb->usergroup['ougc_profilelogo_maxdimensions'] != "")
-				{
-					list($maxwidth, $maxheight) = explode("x", my_strtolower($mybb->usergroup['ougc_profilelogo_maxdimensions']));
-					if(($maxwidth && $width > $maxwidth) || ($maxheight && $height > $maxheight))
+					else
 					{
-						$lang->error_ougc_profilelogotoobig = $lang->sprintf($lang->error_ougc_profilelogotoobig, $maxwidth, $maxheight);
-						$ougc_profilelogo_error = $lang->error_ougc_profilelogotoobig;
+						fwrite($fp, $file);
+						fclose($fp);
+						list($width, $height, $type) = @getimagesize($tmp_name);
+						@unlink($tmp_name);
+						if(!$type)
+						{
+							$ougc_profilelogo_error = $lang->error_invalidougc_profilelogourl;
+						}
 					}
 				}
-				if($width && $height && $mybb->usergroup['ougc_profilelogo_mindimensions'] != "")
+
+				// See if profile logo description is too long
+				if(my_strlen($mybb->input['ougc_profilelogo_description']) > 255)
 				{
-					list($minwidth, $minheight) = explode("x", my_strtolower($mybb->usergroup['ougc_profilelogo_mindimensions']));
-					if(($minwidth && $width > $minwidth) || ($minheight && $height > $minheight))
+					$ougc_profilelogo_error = $lang->error_descriptiontoobig;
+				}
+
+				if(empty($ougc_profilelogo_error))
+				{
+					if($width && $height && $mybb->usergroup['ougc_profilelogo_maxdimensions'] != "")
 					{
-						$lang->error_ougc_profilelogotoosmall = $lang->sprintf($lang->error_ougc_profilelogotoosmall, $minwidth, $minheight);
-						$ougc_profilelogo_error = $lang->error_ougc_profilelogotoosmall;
+						list($maxwidth, $maxheight) = explode("x", my_strtolower($mybb->usergroup['ougc_profilelogo_maxdimensions']));
+						if(($maxwidth && $width > $maxwidth) || ($maxheight && $height > $maxheight))
+						{
+							$lang->error_ougc_profilelogotoobig = $lang->sprintf($lang->error_ougc_profilelogotoobig, $maxwidth, $maxheight);
+							$ougc_profilelogo_error = $lang->error_ougc_profilelogotoobig;
+						}
+					}
+					if($width && $height && $mybb->usergroup['ougc_profilelogo_mindimensions'] != "")
+					{
+						list($minwidth, $minheight) = explode("x", my_strtolower($mybb->usergroup['ougc_profilelogo_mindimensions']));
+						if(($minwidth && $width > $minwidth) || ($minheight && $height > $minheight))
+						{
+							$lang->error_ougc_profilelogotoosmall = $lang->sprintf($lang->error_ougc_profilelogotoosmall, $minwidth, $minheight);
+							$ougc_profilelogo_error = $lang->error_ougc_profilelogotoosmall;
+						}
 					}
 				}
-			}
 
-			if(empty($ougc_profilelogo_error))
-			{
-				if($width > 0 && $height > 0)
+				if(empty($ougc_profilelogo_error))
 				{
-					$ougc_profilelogo_dimensions = (int)$width."|".(int)$height;
+					if($width > 0 && $height > 0)
+					{
+						$ougc_profilelogo_dimensions = (int)$width."|".(int)$height;
+					}
+					$updated_ougc_profilelogo = array(
+						"ougc_profilelogo" => $db->escape_string($mybb->input['ougc_profilelogourl'].'?dateline='.TIME_NOW),
+						"ougc_profilelogo_dimensions" => $ougc_profilelogo_dimensions,
+						"ougc_profilelogo_type" => "remote",
+						"ougc_profilelogo_description" => $db->escape_string($mybb->input['ougc_profilelogo_description'])
+					);
+					$db->update_query("users", $updated_ougc_profilelogo, "uid='{$mybb->user['uid']}'");
+					remove_ougc_profilelogo($mybb->user['uid']);
 				}
-				$updated_ougc_profilelogo = array(
-					"ougc_profilelogo" => $db->escape_string($mybb->input['ougc_profilelogourl'].'?dateline='.TIME_NOW),
-					"ougc_profilelogo_dimensions" => $ougc_profilelogo_dimensions,
-					"ougc_profilelogo_type" => "remote",
-					"ougc_profilelogo_description" => $db->escape_string($mybb->input['ougc_profilelogo_description'])
-				);
-				$db->update_query("users", $updated_ougc_profilelogo, "uid='{$mybb->user['uid']}'");
-				remove_ougc_profilelogo($mybb->user['uid']);
 			}
-		}
-		else // just updating profile logo description
-		{
-			// See if profile logo description is too long
-			if(my_strlen($mybb->input['ougc_profilelogo_description']) > 255)
+			else // just updating profile logo description
 			{
-				$ougc_profilelogo_error = $lang->error_descriptiontoobig;
+				// See if profile logo description is too long
+				if(my_strlen($mybb->input['ougc_profilelogo_description']) > 255)
+				{
+					$ougc_profilelogo_error = $lang->error_descriptiontoobig;
+				}
+
+				if(empty($ougc_profilelogo_error))
+				{
+					$updated_ougc_profilelogo = array(
+						"ougc_profilelogo_description" => $db->escape_string($mybb->input['ougc_profilelogo_description'])
+					);
+					$db->update_query("users", $updated_ougc_profilelogo, "uid='{$mybb->user['uid']}'");
+				}
 			}
 
 			if(empty($ougc_profilelogo_error))
 			{
-				$updated_ougc_profilelogo = array(
-					"ougc_profilelogo_description" => $db->escape_string($mybb->input['ougc_profilelogo_description'])
-				);
-				$db->update_query("users", $updated_ougc_profilelogo, "uid='{$mybb->user['uid']}'");
+				redirect("usercp.php?action=ougc_profilelogo", $lang->redirect_ougc_profilelogoupdated);
+			}
+			else
+			{
+				$mybb->input['action'] = "ougc_profilelogo";
+				$ougc_profilelogo_error = inline_error($ougc_profilelogo_error);
 			}
 		}
-
-		if(empty($ougc_profilelogo_error))
-		{
-			redirect("usercp.php?action=ougc_profilelogo", $lang->redirect_ougc_profilelogoupdated);
-		}
-		else
-		{
-			$mybb->input['action'] = "ougc_profilelogo";
-			$ougc_profilelogo_error = inline_error($ougc_profilelogo_error);
-		}
-	}
-
-	if($mybb->input['action'] == "ougc_profilelogo")
-	{
 		add_breadcrumb($lang->nav_usercp, "usercp.php");
 		add_breadcrumb($lang->change_ougc_profilelogoture, "usercp.php?action=ougc_profilelogo");
 
@@ -671,21 +694,6 @@ function ougc_profilelogo_run()
 		eval("\$ougc_profilelogoture = \"".$templates->get("ougcprofilelogo_usercp")."\";");
 		output_page($ougc_profilelogoture);
 	}
-}
-
-// profile logo display in profile
-function ougc_profilelogo_profile()
-{
-	global $theme, $mybb, $memprofile, $header;
-
-	if(!$memprofile['ougc_profilelogo'])
-	{
-		return;
-	}
-
-	$memprofile['ougc_profilelogo'] = htmlspecialchars_uni($memprofile['ougc_profilelogo']);
-
-	$header = str_replace($theme['logo'], $mybb->get_asset_url($memprofile['ougc_profilelogo']), $header);
 }
 
 // Online location support
