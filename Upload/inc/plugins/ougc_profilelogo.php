@@ -280,6 +280,7 @@ disabled=Disable this feature',
 				<td class="tcat" colspan="2"><strong>{$lang->custom_profile_pic}</strong></td>
 			</tr>
 			<form enctype="multipart/form-data" action="usercp.php" method="post">
+			<input type="hidden" name="action" value="ougc_profilelogo" />
 			<input type="hidden" name="my_post_key" value="{$mybb->post_code}" />
 			{$ougc_profilelogoupload}
 			<tr>
